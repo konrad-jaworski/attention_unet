@@ -35,7 +35,7 @@ class RandomFlip3D:
         return image, label
     
 class AddGaussianNoise3D:
-    def __init__(self, mean=(0.0,5.0), std=(0.03,0.065),p=0.5):
+    def __init__(self, mean=(0.0,5.0), std=(0.03,0.05),p=0.5):
         self.mean = mean
         self.std = std
         self.p=p
@@ -143,7 +143,7 @@ class RandomSequenceRotation:
 
 
 class RandomElasticTransform:
-    def __init__(self, alpha=(5.0, 50.0), sigma=(1, 5), padding_mode='border', same_for_sequence=True,p=0.5):
+    def __init__(self, alpha=(5.0, 15.0), sigma=(1, 3), padding_mode='border', same_for_sequence=True,p=0.5):
         """
         alpha: tuple(float, float), scaling factor range for the displacement (in pixels)
         sigma: tuple(float, float), Gaussian smoothing sigma range
@@ -353,7 +353,7 @@ class RandomBrightnessContrast:
         return video_aug, mask
 
 class RandomPhaseAwareSpeedChange:
-    def __init__(self, cf_range=(0.8, 8),hf_range=(0.3,1.2), p=0.5):
+    def __init__(self, cf_range=(0.8, 5),hf_range=(0.3,1.2), p=0.5):
         """
         cf_range: (min_factor, max_factor) for cooling phase
         hf_range: (min_factor, max_factor) for heating phase

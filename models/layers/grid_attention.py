@@ -11,12 +11,12 @@ class ConvBlock(nn.Module):
         super(ConvBlock, self).__init__()
 
         self.block = nn.Sequential(
-            nn.Conv3d(kernel_size=kernel_size, in_channels=in_channels, out_channels=out_channels, padding=padding,stride=stride), # in this step we only change number of filters
-            nn.BatchNorm3d(out_channels),
+            nn.Conv3d(kernel_size=kernel_size, in_channels=in_channels, out_channels=out_channels, padding=padding,stride=stride,dtype=torch.float64), # in this step we only change number of filters
+            nn.BatchNorm3d(out_channels,dtype=torch.float64),
             nn.ReLU(inplace=True),
 
-            nn.Conv3d(kernel_size=kernel_size, in_channels=out_channels, out_channels=out_channels, padding=padding,stride=stride), # This step does notchange even number of filters
-            nn.BatchNorm3d(out_channels),
+            nn.Conv3d(kernel_size=kernel_size, in_channels=out_channels, out_channels=out_channels, padding=padding,stride=stride,dtype=torch.float64), # This step does notchange even number of filters
+            nn.BatchNorm3d(out_channels,dtype=torch.float64),
             nn.ReLU(inplace=True))
 
     def forward(self, x):
