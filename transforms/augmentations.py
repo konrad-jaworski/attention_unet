@@ -35,17 +35,24 @@ class RandomFlip3D:
         return image, label
     
 class AddGaussianNoise3D:
-    def __init__(self, mean=0.0, std=0.05):
+    def __init__(self, mean=(0.0,5.0), std=(0.03,0.065),p=0.5):
         self.mean = mean
         self.std = std
+        self.p=p
 
     def __call__(self, image,label=None):
-        noise = torch.randn_like(image) * self.std + self.mean
-        aug_img=image + noise
-        return aug_img,label
+        if random.random()<self.p:
+            selected_mean=random.uniform(*self.mean)
+            selected_std=random.uniform(*self.std)
+            noise = torch.randn_like(image) * selected_std + selected_mean
+            aug_img=image + noise
+            return aug_img,label
+        else:
+            return image,label
+
 
 class RandomSequenceRotation:
-    def __init__(self, degrees, max_shift=(0, 0), padding_mode='border'):
+    def __init__(self, degrees=170.0, max_shift=(25, 25), padding_mode='border',p=0.5):
         """
         degrees: float or tuple
         max_shift: tuple (max_dx, max_dy) — maximum pixel shift in x and y directions
@@ -57,6 +64,7 @@ class RandomSequenceRotation:
             self.degrees = degrees
 
         self.max_shift = max_shift
+        self.p=p
 
         if padding_mode not in ['zeros', 'border', 'reflection']:
             raise ValueError("padding_mode must be 'zeros', 'border', or 'reflection'")
@@ -72,37 +80,40 @@ class RandomSequenceRotation:
                 static_mask = True  # mask is [C, H, W], not a sequence
             elif mask.ndim != 4:
                 raise ValueError(f"Mask must be 3D or 4D, got {mask.shape}")
+            
+        if random.random()<self.p:
+            # Pick one random angle and shift for all frames
+            angle = random.uniform(*self.degrees)
+            dx = random.uniform(-self.max_shift[0], self.max_shift[0])
+            dy = random.uniform(-self.max_shift[1], self.max_shift[1])
 
-        # Pick one random angle and shift for all frames
-        angle = random.uniform(*self.degrees)
-        dx = random.uniform(-self.max_shift[0], self.max_shift[0])
-        dy = random.uniform(-self.max_shift[1], self.max_shift[1])
+            # Rotate video frames
+            rotated_frames = [
+                self.rotate_frame(video[:, t, :, :], angle, dx, dy, mode="bilinear")
+                .unsqueeze(1)
+                for t in range(video.shape[1])
+            ]
+            rotated_video = torch.cat(rotated_frames, dim=1)
 
-        # Rotate video frames
-        rotated_frames = [
-            self.rotate_frame(video[:, t, :, :], angle, dx, dy, mode="bilinear")
-            .unsqueeze(1)
-            for t in range(video.shape[1])
-        ]
-        rotated_video = torch.cat(rotated_frames, dim=1)
+            # Rotate mask
+            rotated_mask = None
+            if mask is not None:
+                if static_mask:
+                    # Keep uint8 type for masks
+                    rotated_mask = self.rotate_frame(
+                        mask.float(), angle, dx, dy, mode="nearest"
+                    ).to(mask.dtype)
+                else:
+                    rotated_mask_frames = [
+                        self.rotate_frame(mask[:, t, :, :].float(), angle, dx, dy, mode="nearest")
+                        .unsqueeze(1)
+                        for t in range(mask.shape[1])
+                    ]
+                    rotated_mask = torch.cat(rotated_mask_frames, dim=1).to(mask.dtype)
 
-        # Rotate mask
-        rotated_mask = None
-        if mask is not None:
-            if static_mask:
-                # Keep uint8 type for masks
-                rotated_mask = self.rotate_frame(
-                    mask.float(), angle, dx, dy, mode="nearest"
-                ).to(mask.dtype)
-            else:
-                rotated_mask_frames = [
-                    self.rotate_frame(mask[:, t, :, :].float(), angle, dx, dy, mode="nearest")
-                    .unsqueeze(1)
-                    for t in range(mask.shape[1])
-                ]
-                rotated_mask = torch.cat(rotated_mask_frames, dim=1).to(mask.dtype)
-
-        return rotated_video, rotated_mask
+            return rotated_video, rotated_mask
+        else:
+            return video,mask
 
     def rotate_frame(self, frame, angle_deg, dx=0.0, dy=0.0, mode="bilinear"):
         C, H, W = frame.shape
@@ -132,10 +143,10 @@ class RandomSequenceRotation:
 
 
 class RandomElasticTransform:
-    def __init__(self, alpha=5.0, sigma=3.0, padding_mode='border', same_for_sequence=True):
+    def __init__(self, alpha=(5.0, 50.0), sigma=(1, 5), padding_mode='border', same_for_sequence=True,p=0.5):
         """
-        alpha: float, scaling factor for the displacement
-        sigma: float, standard deviation for Gaussian smoothing of displacement
+        alpha: tuple(float, float), scaling factor range for the displacement (in pixels)
+        sigma: tuple(float, float), Gaussian smoothing sigma range
         padding_mode: 'zeros', 'border', 'reflection'
         same_for_sequence: bool, if True, same displacement applied to all frames
         """
@@ -143,6 +154,7 @@ class RandomElasticTransform:
         self.sigma = sigma
         self.padding_mode = padding_mode
         self.same_for_sequence = same_for_sequence
+        self.p=p
 
     def __call__(self, video, mask=None):
         """
@@ -152,21 +164,24 @@ class RandomElasticTransform:
         """
         C, T, H, W = video.shape
 
-        # Generate displacement field
+        # Generate one displacement field for the whole sequence if requested
         if self.same_for_sequence:
             displacement_field = self.generate_displacement(H, W, device=video.device, dtype=video.dtype)
 
         deformed_frames = []
 
-        for t in range(T):
-            if not self.same_for_sequence:
-                displacement_field = self.generate_displacement(H, W, device=video.device, dtype=video.dtype)
+        if random.random()<self.p:
+            for t in range(T):
+                if not self.same_for_sequence:
+                    displacement_field = self.generate_displacement(H, W, device=video.device, dtype=video.dtype)
 
-            deformed = self.apply_displacement(video[:, t, :, :], displacement_field, mode='bilinear')
-            deformed_frames.append(deformed.unsqueeze(1))
+                deformed = self.apply_displacement(video[:, t, :, :], displacement_field, mode='bilinear')
+                deformed_frames.append(deformed.unsqueeze(1))
 
-        deformed_video = torch.cat(deformed_frames, dim=1)
-        return deformed_video, mask
+            deformed_video = torch.cat(deformed_frames, dim=1)
+            return deformed_video, mask
+        else:
+            return video, mask
 
     def generate_displacement(self, H, W, device='cpu', dtype=torch.float32):
         # Random displacement in pixels
@@ -174,36 +189,42 @@ class RandomElasticTransform:
         dy = torch.randn(H, W, device=device, dtype=dtype)
 
         # Smooth displacement with Gaussian convolution
-        dx = self.smooth_displacement(dx, self.sigma)
-        dy = self.smooth_displacement(dy, self.sigma)
+        selected_sigma = random.uniform(*self.sigma)
+        dx = self.smooth_displacement(dx, selected_sigma)
+        dy = self.smooth_displacement(dy, selected_sigma)
 
-        # Scale by alpha
-        dx = dx * self.alpha / W
-        dy = dy * self.alpha / H
+        # Scale by alpha (convert from pixel displacement to normalized [-1, 1])
+        selected_alpha = random.uniform(*self.alpha)
+        dx = dx * (selected_alpha / (W / 2.0))
+        dy = dy * (selected_alpha / (H / 2.0))
 
         displacement = torch.stack((dx, dy), dim=-1)  # [H, W, 2]
         return displacement
 
     def smooth_displacement(self, disp, sigma):
+        # Ensure odd kernel size to preserve dimensions after conv2d
         kernel_size = int(2 * sigma + 1)
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+
         ax = torch.arange(kernel_size, device=disp.device, dtype=disp.dtype) - kernel_size // 2
         xx, yy = torch.meshgrid(ax, ax, indexing='ij')
         kernel = torch.exp(-(xx**2 + yy**2) / (2 * sigma**2))
         kernel /= kernel.sum()
-        kernel = kernel.unsqueeze(0).unsqueeze(0)  # [1,1,H,W]
+        kernel = kernel.unsqueeze(0).unsqueeze(0)  # [1, 1, Hk, Wk]
 
-        disp = disp.unsqueeze(0).unsqueeze(0)  # [1,1,H,W]
-        disp_smooth = F.conv2d(disp, kernel, padding=kernel_size//2)
+        disp = disp.unsqueeze(0).unsqueeze(0)  # [1, 1, H, W]
+        disp_smooth = F.conv2d(disp, kernel, padding=kernel_size // 2)
         return disp_smooth.squeeze()
 
     def apply_displacement(self, frame, displacement, mode='bilinear'):
         """
         frame: [C, H, W]
-        displacement: [H, W, 2] in normalized coordinates [-1,1]
+        displacement: [H, W, 2] in normalized coordinates [-1, 1]
         """
         C, H, W = frame.shape
 
-        # Create base normalized grid
+        # Base normalized grid
         y, x = torch.meshgrid(
             torch.linspace(-1, 1, H, device=frame.device, dtype=frame.dtype),
             torch.linspace(-1, 1, W, device=frame.device, dtype=frame.dtype),
@@ -214,8 +235,9 @@ class RandomElasticTransform:
         # Add displacement
         grid = base_grid + displacement
 
-        grid = grid.unsqueeze(0)        # [1, H, W, 2]
-        frame = frame.unsqueeze(0)      # [1, C, H, W]
+        # Apply sampling
+        grid = grid.unsqueeze(0)   # [1, H, W, 2]
+        frame = frame.unsqueeze(0) # [1, C, H, W]
 
         deformed = F.grid_sample(
             frame,
@@ -227,13 +249,14 @@ class RandomElasticTransform:
         return deformed.squeeze(0)
 
 class PrependFirstFrame:
-    def __init__(self, max_percent=0.2):
+    def __init__(self, max_percent=0.2,p=0.5):
         """
         max_percent: float, maximum percent of sequence length to prepend
         """
         if not (0 <= max_percent <= 1):
             raise ValueError("max_percent must be between 0 and 1")
         self.max_percent = max_percent
+        self.p=p
 
     def __call__(self, video, mask=None):
         """
@@ -242,19 +265,21 @@ class PrependFirstFrame:
         Returns: (new_video, new_mask)
         """
         C, T, H, W = video.shape
+        if random.random()<self.p:
+            # Determine number of frames to prepend
+            max_prepend = int(T * self.max_percent)
+            if max_prepend == 0:
+                return video, mask
+            num_prepend = random.randint(1, max_prepend)
 
-        # Determine number of frames to prepend
-        max_prepend = int(T * self.max_percent)
-        if max_prepend == 0:
+            # First frame copy
+            first_frame = video[:, 0, :, :].unsqueeze(1)
+            prepend_frames = first_frame.repeat(1, num_prepend, 1, 1)
+            new_video = torch.cat([prepend_frames, video], dim=1)
+            
+            return new_video, mask
+        else:
             return video, mask
-        num_prepend = random.randint(1, max_prepend)
-
-        # First frame copy
-        first_frame = video[:, 0, :, :].unsqueeze(1)
-        prepend_frames = first_frame.repeat(1, num_prepend, 1, 1)
-        new_video = torch.cat([prepend_frames, video], dim=1)
-        
-        return new_video, mask
 
 class RandomCropSequence:
     def __init__(self, crop_size=(256, 256)):
@@ -328,12 +353,14 @@ class RandomBrightnessContrast:
         return video_aug, mask
 
 class RandomPhaseAwareSpeedChange:
-    def __init__(self, speed_range=(0.5, 1.5), p=0.5):
+    def __init__(self, cf_range=(0.8, 8),hf_range=(0.3,1.2), p=0.5):
         """
-        speed_range: (min_factor, max_factor) for each phase
+        cf_range: (min_factor, max_factor) for cooling phase
+        hf_range: (min_factor, max_factor) for heating phase
         p: probability of applying the transform
         """
-        self.speed_range = speed_range
+        self.cf_range = cf_range
+        self.hf_range = hf_range
         self.p = p
 
     def __call__(self, video, mask=None):
@@ -352,8 +379,8 @@ class RandomPhaseAwareSpeedChange:
         peak_idx = torch.argmax(avg_values).item()
 
         # 2. Random speed factors for heating and cooling
-        heating_factor = random.uniform(*self.speed_range)
-        cooling_factor = random.uniform(*self.speed_range)
+        heating_factor = random.uniform(*self.hf_range)
+        cooling_factor = random.uniform(*self.cf_range)
 
         # 3. Interpolate heating phase
         heating_len = peak_idx + 1
