@@ -11,12 +11,12 @@ class ConvBlock(nn.Module):
         super(ConvBlock, self).__init__()
 
         self.block = nn.Sequential(
-            nn.Conv3d(kernel_size=kernel_size, in_channels=in_channels, out_channels=out_channels, padding=padding,stride=stride,dtype=torch.float64), # in this step we only change number of filters
-            nn.BatchNorm3d(out_channels,dtype=torch.float64),
+            nn.Conv3d(kernel_size=kernel_size, in_channels=in_channels, out_channels=out_channels, padding=padding,stride=stride,dtype=torch.float32), # in this step we only change number of filters
+            nn.BatchNorm3d(out_channels,dtype=torch.float32),
             nn.ReLU(inplace=True),
 
-            nn.Conv3d(kernel_size=kernel_size, in_channels=out_channels, out_channels=out_channels, padding=padding,stride=stride,dtype=torch.float64), # This step does notchange even number of filters
-            nn.BatchNorm3d(out_channels,dtype=torch.float64),
+            nn.Conv3d(kernel_size=kernel_size, in_channels=out_channels, out_channels=out_channels, padding=padding,stride=stride,dtype=torch.float32), # This step does notchange even number of filters
+            nn.BatchNorm3d(out_channels,dtype=torch.float32),
             nn.ReLU(inplace=True))
 
     def forward(self, x):
@@ -49,7 +49,9 @@ class UpBlock(nn.Module):
         self.up=nn.ConvTranspose3d(in_channels,out_channels,kernel_size=(4,4,1),stride=(2,2,1),padding=(1,1,0)) # We have learnable upsample of the data, we upsample it to twice the size
 
     def forward(self,x_up,x_skip):
+        # We firtly upsample the input by the factor of 2
         x_up=self.up(x_up)
+        # Then we concatenate them in channel dimmensions
         x=torch.cat([x_up,x_skip],dim=1)
         return self.convblock(x)
     

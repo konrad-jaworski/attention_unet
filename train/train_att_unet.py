@@ -5,35 +5,43 @@ from datasets.cd_dataset import SequenceDataset
 from torch.utils.data import DataLoader
 from models.networks.Attention_unet import AttentionUnet
 from torch import nn, optim
-from train.loss_functions import DiceLoss
 from tqdm import tqdm
 import os
+from pulse_method.toolbox_pulse import thermograms
+
+operator=thermograms()
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Importing data splits
-with open('splits/splits.json','r') as f:
+with open('splits/split_50.json','r') as f:
     splits = json.load(f)
 
-train_images=splits['train']['images']
-train_labels=splits['train']['labels']
-val_images=splits['val']['images']
-val_labels=splits['val']['labels']
+train_data=splits['train']
+val_data=splits['val']
 
 # Setting up the transforms for the data
-train_transform=Compose3D([RandomFlip3D(axes=(0,1,2),p=0.5),
-                     AddGaussianNoise3D(mean=0,std=0.03),
-                     IntensityShift3D(shift_range=(-0.05,0.05),scale_range=(0.95,1.05)),
-                     NormalizeTo01()])
-
-val_transforms = Compose3D([
+transforms=[
+    RandomPhaseAwareSpeedChange(),
+    RandomBrightnessContrast(),
+    PrependFirstFrame(),
+    RandomFlip3D(axes=(1,2)),
+    RandomElasticTransform(),
+    RandomSequenceRotation(),
+    RandomCropSequence(),
+    AddGaussianNoise3D(),
     NormalizeTo01()
-])
+]     
+
+train_transform=Compose3D(transforms)
+
+val_transforms = Compose3D([RandomCropSequence(),
+                            NormalizeTo01()])
 
 # Preparation of the datasets
-train_dataset=SequenceDataset(train_images,train_labels,transform=train_transform,crop=True,limit_sequence=True,target_size=(256,256),allowed_length=45)
-val_dataset=SequenceDataset(val_images,val_labels,transform=val_transforms,crop=True,limit_sequence=True,target_size=(256,256),allowed_length=45)
+train_dataset=SequenceDataset(train_data,train_transform,operator)
+val_dataset=SequenceDataset(val_data,val_transforms,operator)
 
 # Preparation of dataloader
 train_loader=DataLoader(train_dataset,batch_size=1,shuffle=True,num_workers=4)
@@ -83,7 +91,7 @@ for epoch in range(num_epochs):
             val_loss += loss.item()
             
 
-    avg_val_loss = total_loss / len(val_loader)
+    avg_val_loss = val_loss / len(val_loader)
     
 
     # Logging
@@ -96,7 +104,8 @@ for epoch in range(num_epochs):
 
     # Save model checkpoint
     os.makedirs('checkpoints', exist_ok=True)
-    torch.save(model.state_dict(), f'checkpoints/model_unet_epoch_{epoch+1}.pth')
+    if (epoch+1)%10==0:
+        torch.save(model.state_dict(), f'checkpoints/model_unet_epoch_{epoch+1}.pth')
 
 # Save training history
 
